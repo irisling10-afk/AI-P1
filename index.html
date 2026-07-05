@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Prompt 智能寶庫</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <style>
+        body {
+            background-color: #f3f5f8;
+            font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+        }
+        /* 自定義卡片內容捲軸 */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background-color: #d1d5db;
+            border-radius: 20px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background-color: #9ca3af;
+        }
+        /* 隱藏捲軸但可滾動的分類列 (手機版用) */
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+<body class="min-h-screen pb-12">
+
+    <!-- 頂部區塊 -->
+    <header class="pt-12 pb-8 px-4 text-center">
+        <h1 class="text-3xl md:text-4xl font-bold text-gray-800 mb-3 flex items-center justify-center gap-3">
+            <span>🚀</span> AI Prompt 智能寶庫
+        </h1>
+        <a href="https://docs.google.com/spreadsheets/d/1GNAyE5fNZ4pU8MDxxADHvwWVKqEpxPGZ1iqyeMHKn2U/edit?gid=2013526827#gid=2013526827" 
+           target="_blank" rel="noopener noreferrer"
+           class="inline-flex items-center gap-2 text-gray-500 hover:text-gray-700 bg-gray-100 hover:bg-gray-200 px-4 py-1.5 rounded-full text-sm transition-colors mb-8">
+            <i data-lucide="folder-open" class="w-4 h-4"></i>
+            開啟原始資料 Google Sheet
+        </a>
+
+        <!-- 搜尋列 -->
+        <div class="max-w-2xl mx-auto relative mb-8 px-4">
+            <div class="absolute inset-y-0 left-8 flex items-center pointer-events-none text-gray-400">
+                <i data-lucide="search" class="w-5 h-5"></i>
+            </div>
+            <input type="text" id="searchInput" placeholder="搜尋提示詞..." 
+                   class="w-full pl-12 pr-6 py-3.5 rounded-full border border-gray-200 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-700 transition-all text-base">
+        </div>
+
+        <!-- 分類標籤 -->
+        <div class="max-w-5xl mx-auto px-4 overflow-x-auto hide-scrollbar">
+            <div id="categories" class="flex flex-wrap justify-center gap-2.5 min-w-max md:min-w-0">
+                <!-- 標籤會由 JavaScript 動態生成 -->
+            </div>
+        </div>
+    </header>
+
+    <!-- 內容區塊 -->
+    <main class="max-w-7xl mx-auto px-4 md:px-6 lg:px-8">
+        <div class="flex items-center gap-2 mb-6 ml-2">
+            <span class="text-2xl">🧠</span>
+            <h2 class="text-xl font-bold text-gray-800">AI 協思</h2>
+        </div>
+
+        <!-- 載入中提示 -->
+        <div id="loading" class="text-center py-20">
+            <i data-lucide="loader-2" class="w-10 h-10 animate-spin text-blue-500 mx-auto mb-4"></i>
+            <p class="text-gray-500 font-medium">正在從 Google Sheet 讀取資料中...</p>
+        </div>
+
+        <!-- 提示詞卡片網格 -->
+        <div id="cards" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 hidden">
+            <!-- 卡片會由 JavaScript 動態生成 -->
+        </div>
+    </main>
+
+    <script>
+        // 初始化 Lucide Icons
+        lucide.createIcons();
+
+        // 狀態管理
+        let allData = [];
+        let activeCategory = '全部';
+        let searchTerm = '';
+
+        // DOM 元素
+        const categoriesContainer = document.getElementById('categories');
+        const cardsContainer = document.getElementById('cards');
+        const searchInput = document.getElementById('searchInput');
+        const loadingSpinner = document.getElementById('loading');
+
+        // Google Sheet 網址處理 (使用 Google Visualization API，原生支援 CORS 避免 Failed to fetch)
+        const sheetId = '1GNAyE5fNZ4pU8MDxxADHvwWVKqEpxPGZ1iqyeMHKn2U';
+        const gid = '2013526827';
+        const jsonUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&gid=${gid}`;
+
+        // 初始化：獲取資料
+        fetchData();
+
+        async function fetchData() {
+            try {
+                // 呼叫 Google Visualization API 獲取 JSON 資料
+                const response = await fetch(jsonUrl);
+                if (!response.ok) throw new Error('Network error');
+                
+                const text = await response.text();
+                
+                // Google 回傳的是 JSONP 格式 /*O_o*/ google.visualization.Query.setResponse({ ... })
+                // 我們只需擷取中間的 JSON 物件
+                const jsonString = text.substring(text.indexOf('{'), text.lastIndexOf('}') + 1);
+                const data = JSON.parse(jsonString);
+
+                // 轉換回 [[標題], [列1], [列2]...] 的二維陣列結構以相容舊有邏輯
+                const headers = data.table.cols.map(col => col.label || '');
+                const rows = data.table.rows.map(row => {
+                    // 若該列完全為空，回傳空陣列
+                    if (!row || !row.c) return [];
+                    return row.c.map(cell => {
+                        return (cell !== null && cell.v !== null && cell.v !== undefined) ? String(cell.v) : '';
+                    });
+                });
+
+                processData([headers, ...rows]);
+
+            } catch (err) {
+                console.error("載入資料失敗:", err);
+                loadingSpinner.innerHTML = `
+                    <div class="text-red-500">
+                        <i data-lucide="alert-circle" class="w-10 h-10 mx-auto mb-3"></i>
+                        <p>讀取資料失敗。</p>
+                        <p class="text-sm mt-2">請確認 Google Sheet 是否已設定為「知道連結的人均可查看」。</p>
+                    </div>
+                `;
+                lucide.createIcons();
+            }
+        }
+
+        function processData(data) {
+            if (data.length < 2) {
+                loadingSpinner.innerHTML = '<p class="text-gray-500">沒有找到資料紀錄。</p>';
+                return;
+            }
+
+            const headers = data[0];
+            
+            // 嘗試自動辨識欄位位置 (分類、標題、內容)
+            let catIdx = 0, titleIdx = 1, contentIdx = 2;
+            headers.forEach((h, i) => {
+                const headerStr = String(h).toLowerCase();
+                if (headerStr.includes('分類') || headerStr.includes('category')) catIdx = i;
+                if (headerStr.includes('標題') || headerStr.includes('名稱') || headerStr.includes('title')) titleIdx = i;
+                if (headerStr.includes('內容') || headerStr.includes('提示詞') || headerStr.includes('prompt')) contentIdx = i;
+            });
+
+            // 解析並整理資料
+            allData = data.slice(1)
+                .map(row => ({
+                    category: row[catIdx] ? String(row[catIdx]).trim() : '未分類',
+                    title: row[titleIdx] ? String(row[titleIdx]).trim() : '無標題',
+                    content: row[contentIdx] ? String(row[contentIdx]).trim() : ''
+                }))
+                // 過濾掉完全空白的行
+                .filter(item => item.title !== '無標題' || item.content !== '');
+
+            // 移除載入狀態，顯示內容
+            loadingSpinner.classList.add('hidden');
+            cardsContainer.classList.remove('hidden');
+
+            renderTags();
+            renderCards();
+        }
+
+        // 渲染分類標籤
+        function renderTags() {
+            // 取得所有不重複的分類 (排除空白)
+            const uniqueTags = ['全部', ...new Set(allData.map(item => item.category).filter(Boolean))];
+            
+            categoriesContainer.innerHTML = uniqueTags.map(tag => {
+                const isActive = activeCategory === tag;
+                const baseClasses = "rounded-full px-5 py-1.5 text-sm font-medium transition-all duration-200 border cursor-pointer whitespace-nowrap";
+                const activeClasses = isActive 
+                    ? "bg-blue-600 text-white border-blue-600 shadow-sm" 
+                    : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50 hover:border-gray-300";
+                
+                return `<button onclick="setCategory('${tag}')" class="${baseClasses} ${activeClasses}">${tag}</button>`;
+            }).join('');
+        }
+
+        // 切換分類
+        window.setCategory = function(category) {
+            activeCategory = category;
+            renderTags();
+            renderCards();
+        };
+
+        // 搜尋監聽
+        searchInput.addEventListener('input', (e) => {
+            searchTerm = e.target.value;
+            renderCards();
+        });
+
+        // 渲染卡片
+        function renderCards() {
+            const filteredData = allData.filter(item => {
+                // 分類過濾
+                const matchCategory = activeCategory === '全部' || item.category === activeCategory;
+                // 關鍵字過濾 (比對標題與內容)
+                const searchLower = searchTerm.toLowerCase();
+                const matchSearch = item.title.toLowerCase().includes(searchLower) || 
+                                    item.content.toLowerCase().includes(searchLower);
+                return matchCategory && matchSearch;
+            });
+
+            if (filteredData.length === 0) {
+                cardsContainer.innerHTML = `
+                    <div class="col-span-full text-center py-20 text-gray-500">
+                        <i data-lucide="search-x" class="w-12 h-12 mx-auto mb-3 text-gray-300"></i>
+                        <p>找不到符合的提示詞</p>
+                    </div>`;
+                lucide.createIcons();
+                return;
+            }
+
+            cardsContainer.innerHTML = filteredData.map(item => `
+                <div class="bg-white rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-300 border-t-[6px] border-purple-600 p-6 flex flex-col h-[420px]">
+                    <!-- 分類標籤 -->
+                    <div class="mb-3">
+                        <span class="bg-sky-100 text-sky-700 text-xs px-2.5 py-1 rounded-full font-semibold">
+                            ${escapeHTML(item.category)}
+                        </span>
+                    </div>
+                    
+                    <!-- 標題 -->
+                    <h3 class="text-lg font-bold text-gray-800 mb-4 line-clamp-1" title="${escapeHTML(item.title)}">
+                        ${escapeHTML(item.title)}
+                    </h3>
+                    
+                    <!-- 內容區塊 (可捲動) -->
+                    <div class="bg-gray-50 rounded-xl p-4 text-sm text-gray-600 flex-grow overflow-y-auto mb-5 whitespace-pre-wrap border border-gray-100 custom-scrollbar leading-relaxed">
+${escapeHTML(item.content)}
+                    </div>
+                    
+                    <!-- 按鈕 -->
+                    <button onclick="copyPrompt(this, \`${encodeURIComponent(item.content)}\`)" 
+                            class="w-full bg-[#007bff] hover:bg-blue-700 text-white font-medium py-2.5 rounded-xl transition-colors flex items-center justify-center gap-2 group">
+                        <i data-lucide="copy" class="w-4 h-4 group-hover:scale-110 transition-transform"></i>
+                        <span class="btn-text">複製 Prompt</span>
+                    </button>
+                </div>
+            `).join('');
+
+            lucide.createIcons();
+        }
+
+        // 複製提示詞邏輯
+        window.copyPrompt = async function(btnEl, encodedText) {
+            const text = decodeURIComponent(encodedText);
+            const iconEl = btnEl.querySelector('i');
+            const textEl = btnEl.querySelector('.btn-text');
+
+            try {
+                // 使用現代剪貼簿 API
+                await navigator.clipboard.writeText(text);
+                
+                // 變更為成功狀態
+                btnEl.classList.replace('bg-[#007bff]', 'bg-green-600');
+                btnEl.classList.replace('hover:bg-blue-700', 'hover:bg-green-700');
+                iconEl.setAttribute('data-lucide', 'check');
+                textEl.textContent = '已複製！';
+                lucide.createIcons();
+
+                // 2 秒後恢復原狀
+                setTimeout(() => {
+                    btnEl.classList.replace('bg-green-600', 'bg-[#007bff]');
+                    btnEl.classList.replace('hover:bg-green-700', 'hover:bg-blue-700');
+                    iconEl.setAttribute('data-lucide', 'copy');
+                    textEl.textContent = '複製 Prompt';
+                    lucide.createIcons();
+                }, 2000);
+
+            } catch (err) {
+                // 若剪貼簿 API 失敗的降級處理
+                const textArea = document.createElement("textarea");
+                textArea.value = text;
+                document.body.appendChild(textArea);
+                textArea.select();
+                try {
+                    document.execCommand('copy');
+                    alert('已複製到剪貼簿！');
+                } catch (ex) {
+                    alert('複製失敗，請手動選取複製。');
+                }
+                document.body.removeChild(textArea);
+            }
+        };
+
+        // 安全處理文字顯示 (避免 XSS 攻擊與破壞版面)
+        function escapeHTML(str) {
+            return str.replace(/[&<>'"]/g, 
+                tag => ({
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    "'": '&#39;',
+                    '"': '&quot;'
+                }[tag] || tag)
+            );
+        }
+    </script>
+</body>
+</html>
